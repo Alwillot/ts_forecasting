@@ -2,6 +2,8 @@ import os
 
 REPO_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
 DATA_FOLDER_PATH = os.path.join(REPO_DIR, 'data/')
+FINAL_DATA_PATH = os.path.join(DATA_FOLDER_PATH, 'consolidated')
+FINAL_DATA_FILENAME = 'data_consolidated.csv'
 
 DATASETS = {
     "train": "train.csv",

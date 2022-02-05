@@ -1,16 +1,10 @@
+from operator import index
 import os
 from typing import Dict
+from xmlrpc.client import Boolean
 
 import numpy as np
 import pandas as pd
-
-from config.global_configs import (
-    DATA_FOLDER_PATH,
-    DATASETS,
-    TARGET,
-    STORE_ID,
-    DATE_COL
-)
 
 
 def import_csv(folder_path: str, filename: str, **kwargs):
@@ -86,42 +80,142 @@ def merge_train_oil(df_train: pd.DataFrame, df_oil: pd.DataFrame, date_col: str)
     return df_merge_oil
 
 
-def merge_train_transactions():
-    pass
+def merge_train_transactions(df_train: pd.DataFrame, df_transactions: pd.DataFrame, date_col: str, store_id:str):
+    """
+    Merge the training/testing sets with the transactions dataframe based on the date column and the store id.
+
+    Args:
+        df_train (pd.DataFrame): dataframe containing the train/test set concatenation
+        df_transactions (pd.DataFrame): dataframe containing the transactions related information
+        date_col (str): name of the column containing the date information in both dataframes
+        store_id (str): common column between the two dataframes
+    """
+    df_merge_transactions = df_train.merge(df_transactions, on=[store_id, date_col], how='left')
+    return df_merge_transactions
 
 
-def merge_train_holidays():
-    pass
+def merge_train_holidays(df_train: pd.DataFrame, df_holidays: pd.DataFrame, date_col: str):
+    """
+    Merge the training/testing sets with the holidays dataframe based on the date column
+
+    Args:
+        df_train (pd.DataFrame): dataframe containing the train/test set concatenation
+        df_holidays (pd.DataFrame): dataframe containing the holidays related information
+        date_col (str): name of the column containing the date information in both dataframes
+    """
+    # Duplicate issue with the name
+    if "type" in df_holidays.columns:
+        df_holidays = df_holidays.rename(columns={"type": "type_holidays"})
+
+    df_merge_holidays = df_train.merge(df_holidays, on=date_col, how='left')
+    return df_merge_holidays
 
 
-def import_and_process(data_folder: str, dataset: str, target: str, store_id: str, date_col: str, **kwargs):
-    # global compilation of previous functions
+def import_and_process(
+    data_folder: str,
+    dataset: Dict[str, str],
+    target: str,
+    store_id: str,
+    date_col: str,
+    **kwargs
+):
+    """
+    Import all the csv files contained in the data folder and perform successive merges in order to
+    create a final dataframe ready for feature engineering.
 
+    Args:
+        data_folder (str): Name of the folder in which the csv file is
+        dataset (Dict[str, str]): dictionnary containing the csv files along with their name
+        target (str): name of the target column in the training dataframe
+        store_id (str): column containing the store identifier
+        date_col (str): column containing the date information
+
+    Returns:
+        pd.DataFrame: dataframe containing the merged information from all individual dataframe
+    """
+    ## IMPORTS
     # Import of all the dataframes
     dict_imports = import_data_folder(data_folder, dataset, **kwargs)
 
+    ## CONCATENATION
     # Concatenation of the training and testing datasets
     df_concat = concat_train_test(dict_imports['train'], dict_imports['test'], target)
-    
+
     # Merging the concatenated dataframe with the store dataframe
     df_train_store = merge_train_store(df_concat, dict_imports['stores'], store_id)
 
     # Merging the concatenated dataframe with the oil dataframe
-    df_train_oil = merge_train_store(df_train_store, dict_imports['oil'], date_col)
-    return df_train_oil
+    df_train_oil = merge_train_oil(df_train_store, dict_imports['oil'], date_col)
+
+    # Merging the concatenated dataframe with the holidays dataframe
+    df_train_holidays = merge_train_holidays(df_train_oil, dict_imports['holidays'], date_col)
+
+    # Merging the concatenated dataframe with the transactions dataframe
+    df_train_complete = merge_train_transactions(df_train_holidays, dict_imports['transactions'], date_col, store_id)
+    
+    return df_train_complete
 
 
-if __name__ == "__main__":
-    data_folder = DATA_FOLDER_PATH
-    dataset = DATASETS
-    target = TARGET
-    store_id = STORE_ID
-    date_col = DATE_COL
+def export_dataframe(df:pd.DataFrame, data_folder:str, final_path:str):
+    """
+    Export the final dataframe as a csv file.
 
-    df_final = import_and_process(data_folder, dataset, target, store_id, date_col)
+    Args:
+        df (pd.DataFrame): dataframe that should be exported
+        data_folder (str): name of the folder containing the data information
+        final_path (str): path from the data folder to the 
 
-    print(len(df_final))
-    print(df_final.head(5))
-    print(df_final.tail(5))
+    Returns:
+        None
+    """
+    path_to_save = os.path.join(data_folder, final_path)
+    df.to_csv(path_to_save, index=False)
+    
+    print("Export made successfully")
+    return None
 
-    print(df_final.isna().sum())
+
+def prepare_and_save(
+    data_folder: str,
+    datasets_path: Dict[str, str],
+    final_dataset_folder: str,
+    final_dataset_name: str,
+    target_col: str,
+    store_id_col: str,
+    date_col: str,
+    save: bool=True,
+    **kwargs
+):
+    """
+    Handle the data importation, preparation, and exportation if not already existing.
+    Else simply import the existing csv file.
+
+    Args:
+        data_folder (str): path to the data folder
+        datasets_path (Dict[str): name of each csv file in the data folder
+        final_dataset_folder (str): path from the root of the project to the final data folder
+        final_dataset_name (str): name of the final dataframe (csv file)
+        target_col (str): name of the column that we aim at predicting
+        store_id_col (str): name of the column containing the stores ids in the dataframes
+        date_col (str): name of the column containing the date information in the dataframes
+        save (Boolean): determines whether to save the created dataframe if not existing (defaults to True)
+    """
+    # If the dataframe is not already existing, we create it
+    if not os.path.exists(os.path.join(final_dataset_folder, final_dataset_name)):
+        print("Creation of the main dataset")
+        
+        # Creation of the path to the final dataset folder if not existing
+        if not os.path.exists(final_dataset_folder):
+            os.makedirs(final_dataset_folder)
+        
+        df_final = import_and_process(data_folder, datasets_path, target_col, store_id_col, date_col, **kwargs)
+
+        if save:
+            export_dataframe(df_final, final_dataset_folder, final_dataset_name)
+    
+    # If the dataset already exists we can simply import it
+    else:
+        print("Dataset already exists, importing it")
+        df_final = import_csv(final_dataset_folder, final_dataset_name)
+
+    return df_final
